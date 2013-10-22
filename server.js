@@ -1,14 +1,10 @@
-/* CALL SERVER IMPLEMENTATION */
-
-var isBusy = false;
-
 function OfflineKey(address, params) {
     var _address = address;
     var _params = params;
     var _key = calcMD5(ko.toJSON({ address: address, params: params }));
 
     return {
-        
+
         getCacheKey : function() {
             return _key;
         },
@@ -23,6 +19,7 @@ function OfflineKey(address, params) {
 
 function serverPrototype() {
 
+    var SERVER_URL = "not_set/";
     var serviceNotificationDelegate = null;
     var serviceErrorDelegate = null;
     var unhandledErrorDelegate = null;
@@ -32,32 +29,37 @@ function serverPrototype() {
     var beforeServerCallDelegate = null;
     var onAppOfflineDelegate = null;
     var onAppOnlineDelegate = null;
-    
+    var techUsed = 'ajax'
+    var loggingEnabled = true;
     var serviceUseCache = true;
     var offlineItems = null;
+    var showLoadingDelegate = null;
+    var hideLoadingDelegate = null;
+    var currentServerCall = null;
+    var isOffline = false;
+    var allServices = [];
+    var serviceDependencies = [];
+    var isBusy = false;
+    
     try {
         var offlineItemsAsString = localStorage.getItem("offlinePackage");
         if (offlineItemsAsString != null) {
             offlineItems = JSON.parse(offlineItemsAsString);
         }
     } catch (e) {
-        console.log("Failed to read offlinePackage from local storage: " + inspectObject(e));
+        console.log("Failed to read offlinePackage from local storage: " + e);
     }
-     
-    var offlinePackage = new DoublyLinkedList();
+
+    var offlinePackage = new Array();
     if (offlineItems != null) {
-        offlinePackage.addArray(offlineItems);
+        offlinePackage.concat(offlineItems);
     }
     
-    var currentServerCall = null;
-    var isOffline = false;
-    var serviceDependencies = null;
-
     var abortAnyPendingServerCalls = function () {
-        /*if (currentServerCall && currentServerCall.readyState != 4) {
+        if (currentServerCall && currentServerCall.readyState != 4) {
             currentServerCall.abort();
             currentServerCall = null;
-        }*/
+        }
         isBusy = false;
     };
 
@@ -65,20 +67,22 @@ function serverPrototype() {
 
         var wasHandledUsingCache = (offlineKey == null && orgCall.callType == "GET");
 
-        if (writeToLog) {
-            console.log("Got result for " + address + ":" + inspectObject(data));
+        if (loggingEnabled && writeToLog) {
+            console.log("Got result for " + address + ":" + data);
         }
 
         
         if (data.code > 0) {
-            
+
             if (exceptionHandler) {
-                var handled = exceptionHandler(data);
+                var handled = exceptionHandler(Globalize.localize(data.code), errorElementId, data.code, '');
                 if (!handled) {
                     internalHandleError(data, errorElementId);
                 }
                 else {
-                    hideLoading();
+                    if (hideLoadingDelegate) {
+                        hideLoadingDelegate();
+                    }
                 }
             }
             else {
@@ -104,7 +108,7 @@ function serverPrototype() {
                     localStorage.setItem(offlineKey.getAddress(), ko.toJSON(storedAddressCache));
                 }
             } catch (e) {
-                console.log("Failed to save item to cache: " + inspectObject(e));
+                console.log("Failed to save item to cache: " + e);
             }
 
             return;
@@ -121,7 +125,7 @@ function serverPrototype() {
                         var dependentService = dependency.dependentServices[j];
                         //will remove all cached items under this address
                         if (writeToLog) {
-                            console.log("Removing cache for service: " + inspectObject(dependentService));
+                            console.log("Removing cache for service: " + dependentService);
                         }
                         localStorage.removeItem(dependentService); //this will remove all service calls against this address
                     }
@@ -133,7 +137,7 @@ function serverPrototype() {
 
             try {
                 if (offlineKey != null) {
-                	
+
                     if (writeToLog) {
                         console.log("Adding offlinekey to local storage: " + offlineKey.getCacheKey() + " to address: " + offlineKey.getAddress());
                     }
@@ -150,7 +154,7 @@ function serverPrototype() {
                     localStorage.setItem(offlineKey.getAddress(), ko.toJSON(storedAddressCache));
                 }
             } catch (e) {
-                console.log("Failed to save item to cache: " + inspectObject(e));
+                console.log("Failed to save item to cache: " + e);
             }
 
             data.wasHandledUsingCache = wasHandledUsingCache;
@@ -164,7 +168,9 @@ function serverPrototype() {
     };
 
     var internalHandleError = function(data, elementId) {
-        hideLoading();
+        if (hideLoadingDelegate) {
+            hideLoadingDelegate();
+        }
 
         if (serviceErrorDelegate != null) {
             var handled = serviceErrorDelegate(data.code, data.ErrorMessage);
@@ -178,6 +184,52 @@ function serverPrototype() {
         }
         return false;
     };
+
+    var sendOfflineItem = function (index) {
+            var item = server.getOfflinePackage().item(index);
+
+            if (item == null) {
+                if (offlineChangesAppliedDelegate) {
+                    offlineChangesAppliedDelegate();
+                }
+                return;
+            }
+
+            server.call(
+            {
+                callType: "POST",
+                availableOffline: false,
+                address: item.address,
+                params: item.params,
+                waitMessage: "gen_saving",
+                writeToLog: false,
+                successHandler: function (data) {
+                    console.log("Offline item: " + item + " went though successfully.");
+
+                            //ok the item went through...remove it from the source
+                            server.getOfflinePackage().splice(index, 1);
+
+                            //then start with the next one...should be the same index
+                            server.sendOfflineItem(index);
+                        },
+                        exceptionHandler: function (exception, elementId) {
+                            console.log("Offline item: " + item + " failed miserably.");
+
+                            //OPTION 1: try with the next one
+                            //server.sendOfflineItem(index++, context);
+
+                            //OPTION 2: remove and take the next one
+                            server.getOfflinePackage().slice(index, 1);
+                            //then start with the next one...should be the same index
+                            server.sendOfflineItem(index);
+                        },
+                        unhandledErrorHandler: function (param1, param2, param3) {
+                            console.log("Unhandled exception occurred while sending offline package to server: " + param1);
+                            server.sendOfflineItem(index++);
+                        }
+                    }
+                    );
+        };
 
     /*
     * CallType: [GET or POST:string]
@@ -204,7 +256,7 @@ function serverPrototype() {
             var cachedCallContainer = localStorage.getItem(key.getAddress());
 
             /*if (writeToLog) {
-                console.log("Cache container currently contains: " + inspectObject(cachedCallContainer));
+                console.log("Cache container currently contains: " + cachedCallContainer);
             }*/
             
             try {
@@ -216,10 +268,10 @@ function serverPrototype() {
                 }
 
                 if (cachedCall == null) {
-                	if (writeToLog) {
+                    if (writeToLog) {
                         console.log("Key does not exist in local storage: " + key.getCacheKey());
-                        console.log("Cache container currently contains the following data for that address: " + inspectObject(cachedCallContainer));
-                        console.log("Currently calling with params: " + inspectObject(params));
+                        console.log("Cache container currently contains the following data for that address: " + cachedCallContainer);
+                        console.log("Currently calling with params: " + params);
                     }
                     returnVal.offlineKey = key;
                     return returnVal;
@@ -228,10 +280,10 @@ function serverPrototype() {
                     if (cachedCall.time != null && cachedCall.data != null) { //check if too old
                         var whenToRemoveFromCache = new Date(cachedCall.time).addMinutes(MINUTES_BEFORE_CACHE_IS_CLEARED);
                         if (whenToRemoveFromCache.isBefore(new Date())) {
-                            
-                        	//this cache is old...remove
+
+                            //this cache is old...remove
                             if (writeToLog) {
-                                console.log("Key time: " + inspectObject(whenToRemoveFromCache) + " has expired. Item will be removed from cache");
+                                console.log("Key time: " + whenToRemoveFromCache + " has expired. Item will be removed from cache");
                             }
 
                             cachedCallContainer[key.getCacheKey()] = null;
@@ -241,8 +293,8 @@ function serverPrototype() {
                             return returnVal;
                         }
                         else {
-                        	if (writeToLog) {
-                                console.log("Key exist in local storage...returning data: " + inspectObject(cachedCall.data));
+                            if (writeToLog) {
+                                console.log("Key exist in local storage...returning data: " + cachedCall.data);
                             }
                             returnVal.data = cachedCall.data;
                             returnVal.handledOffline = true;
@@ -250,7 +302,7 @@ function serverPrototype() {
                     }
                 }
             } catch (e) {
-            	console.log("Error trying to get from cache: " + inspectObject(e));
+                console.log("Error trying to get from cache: " + e);
             }
 
         }
@@ -259,20 +311,20 @@ function serverPrototype() {
             if (!server.isOnline()) {
 
                 //if the server is offline then handled offline should always be true
-            	try {
-                    offlinePackage.add({ time: new Date(), address: address, params: params });
+                try {
+                    offlinePackage.push({ time: new Date(), address: address, params: params });
                     //make sure to save the offlinePackage
-                    localStorage.setItem("offlinePackage", ko.toJSON(offlinePackage.toArray()));
+                    localStorage.setItem("offlinePackage", ko.toJSON(offlinePackage));
                     if (offlineChangesAddedDelegate) {
                         offlineChangesAddedDelegate();
                     }
                     returnVal.handledOffline = true;
                 } catch (e) {
-                    console.log("Failed to save the offline package (WHAT SHOULD WE DO HERE?): " + inspectObject(e));
+                    console.log("Failed to save the offline package (WHAT SHOULD WE DO HERE?): " + e);
                 }
 
                 if (writeToLog) {
-                    console.log("OFFLINE PACKAGE CURRENTLY CONTAINS:" + inspectObject(offlinePackage.toArray()));
+                    console.log("OFFLINE PACKAGE CURRENTLY CONTAINS:" + offlinePackage);
                 }    
             }
         }
@@ -283,14 +335,14 @@ function serverPrototype() {
         for (var j = 0; j < allServices.length; j++) {
             var service = allServices[j];
             //will remove all cached items under this address
-            console.log("Removing cache for service: " + inspectObject(service));
+            console.log("Removing cache for service: " + service);
             localStorage.removeItem(service); //this will remove all service calls against this address
         }
     };
 
     var trySendOfflinePackage = function () {
-        if (offlinePackage.size() > 0) {
-            console.log("Sending " + offlinePackage.size() + " cached calls to the server.");
+        if (offlinePackage.length > 0) {
+            console.log("Sending " + offlinePackage.length + " cached calls to the server.");
             server.sendOfflineItem(0);
             
         }
@@ -328,6 +380,8 @@ function serverPrototype() {
         *
         */
         call: function (data) {
+            console.log(data.address);
+
             var callType = data.callType;
             var availableOffline = data.availableOffline;
             var address = data.address;
@@ -343,20 +397,49 @@ function serverPrototype() {
             var errorContainer = null;
             var offlineHandler = data.offlineHandler;
             var timeout = data.timeout;
-            
+            var techToUseForThisCall = techUsed;
+            var serverMethodToCall = data.serverMethod;
+            var charset = data.charset;
+            var contentType = data.contentType;
+            var dataType = data.dataType;
+
+            if (typeof address === 'undefined' || address.constructor !== String) {
+                throw "address not set or is not a string";
+            }
+
+            if (typeof params === 'undefined' || params === null) {
+                params = {};
+            }
+
+            if (typeof charset === 'undefined') {
+                charset = "utf-8";
+            }
+
+            if (typeof contentType === 'undefined') {
+                contentType = "application/json";
+            }
+
+            if (typeof dataType === 'undefined') {
+                dataType = "json";
+            }
+
             if (beforeServerCallDelegate) {
-            	if (!beforeServerCallDelegate(data)) {
-            		//this call has been cancelled
-            		return;
-            	}
+                if (!beforeServerCallDelegate(data)) {
+                    //this call has been cancelled
+                    return;
+                }
             }
             
+            if (data.useTech) {
+                techToUseForThisCall = data.useTech;
+            }
+
             if (!timeout) {
                 timeout = 60000;
             }
 
-            if (writeToLog === undefined) {
-                writeToLog = false;
+            if (!writeToLog) {
+                writeToLog = true;
             }
             
             if (data.hideLoadingOnSuccess != null && data.hideLoadingOnSuccess) {
@@ -364,8 +447,7 @@ function serverPrototype() {
             }
 
             if (data.errorContainer) {
-            	errorContainer = data.errorContainer;
-            	hideError(errorContainer);
+                errorContainer = data.errorContainer;
             }
             
             if (data.forceUpdate || !serviceUseCache) {
@@ -376,7 +458,7 @@ function serverPrototype() {
             if (availableOffline == null) {
                 availableOffline = true;
             }
-            
+
             if (isBusy) {
                 if (writeToLog) {
                     console.log("Aborting previous server call.");
@@ -384,44 +466,42 @@ function serverPrototype() {
                 abortAnyPendingServerCalls();
                 //return;
             }
-            
+
             var errorElementId = errorContainer;
 
             var offlineKey = null;
 
             if (data.execNative) {
-            	execNative = data.execNative;
+                execNative = data.execNative;
             }
             
             //if a funtion is set to force update we still allow it to read from cache of the server is offline
             if (!forceUpdate || !server.isOnline()) { //ALWAYS TRY TO USE THE CACHE
-            	
+
                 if (!availableOffline && !server.isOnline()) {
-                   
-                	var offlineHandlerTookCareOfIt = false;
+
+                    var offlineHandlerTookCareOfIt = false;
                     if (offlineHandler != null) {
                         offlineHandlerTookCareOfIt = offlineHandler(); //give the client the possibility to do something when a post was handled offline
                     }
                     
                     if (!offlineHandlerTookCareOfIt) {
-                    	//show a message?
+                        //show a message?
                         if (messageDelegate != null) {
                             messageDelegate("gen_not_supported_offline");
                         }
                         else {
-                        	console.log("You are currently offline and this method does not support offline mode");
+                            console.log("You are currently offline and this method does not support offline mode");
                         }
                     }
-                	return;
+                    return;
                 }
 
                 var offlineResp = tryHandleOffline(callType, address, params, writeToLog, successHandler);
                 if (offlineResp.handledOffline) {
                     if (callType != "POST") { //if post then we just added a package to be send later
-                    	handleSuccess(data, address, offlineResp.data, null, writeToLog, errorElementId, successHandler, exceptionHandler);
-                    	if (hideLoadingOnSuccess) {
-                            hideLoading();
-                        }
+
+                        handleSuccess(data, address, offlineResp.data, null, writeToLog, errorElementId, successHandler, exceptionHandler);
                     }
                     else {
                         if (offlineHandler != null) {
@@ -457,58 +537,122 @@ function serverPrototype() {
                 }
                 return;
             }
-            
-            showLoading();
-            
-            if (writeToLog) {
-                console.log("Calling server method: " + SERVER_URL + address + ". With params: " + inspectObject(params));
+
+            if (waitMessage != null && showLoadingDelegate) {
+                var localized = Globalize.localize(waitMessage);
+                if (localized) {
+                    showLoadingDelegate(localized);
+                }
+                else {
+                    showLoadingDelegate(waitMessage);
+                }
+            }
+
+            if (loggingEnabled && writeToLog) {
+                console.log("Calling server method: " + SERVER_URL + address + ". With params: " + params);
             }
             isBusy = true;
             var _this = this;
             var orgCallData = data;
             
             if (data.execNative) {
-            	
+
                 if (!BROWSER) {
                     params.address = SERVER_URL + address;
                     window.plugins.serverRequest.post(params, function(data) {
-                    	isBusy = false;
-                            if (data != null) {
+                        isBusy = false;
+                        if (data != null) {
                             handleSuccess(orgCallData, address, data, offlineKey, writeToLog, errorElementId, successHandler, exceptionHandler);
                             if (hideLoadingOnSuccess) {
-                                hideLoading();
+                                if (hideLoadingDelegate) {
+                                    hideLoadingDelegate();
+                                }
                             }
                         }
                         else {
-                            hideLoading();
+                            if (hideLoadingDelegate) {
+                                hideLoadingDelegate();
+                            }
                         }
                     }, function(data) {
-                    	    hideLoading();
+                        if (hideLoadingDelegate) {
+                            hideLoadingDelegate();
+                        }
                     });
                     return;
                 }
             }
             
+            if (techToUseForThisCall == 'signalr') {
+                if (!serverMethodToCall) {
+                    console.log("ERROR - you have not defined serverMethod for the server.call method so there is no method to call on the server side.");
+                    return;
+                }
+
+                serverMethodToCall(params).done(function (data) {
+                    isBusy = false;
+                    if (data != null) {
+                        handleSuccess(orgCallData, address, data, offlineKey, writeToLog, errorElementId, successHandler, exceptionHandler);
+                        if (hideLoadingOnSuccess) {
+                            if (hideLoadingDelegate) {
+                                hideLoadingDelegate();
+                            }
+                        }
+                    }
+                    else {
+                        if (hideLoadingDelegate) {
+                            hideLoadingDelegate();
+                        }
+                    }
+                }).fail(function (errorThrown) {
+                    isBusy = false;
+                    if (hideLoadingDelegate) {
+                        hideLoadingDelegate();
+                    }
+
+                    if (!unhandledErrorHandler) {
+                        if (unhandledErrorDelegate) {
+                            unhandledErrorDelegate(address, {}, {}, errorThrown);
+                        }
+                        else {
+                            console.log("SERVER UNHANDLED ERROR (You should assign an unhandled error delegate): " + textStatus);
+                        }
+                    }
+                    else {
+                        unhandledErrorHandler(errorThrown);
+                    }
+                });
+
+                return;
+            }
+            
             var urlToCall = address;
-            if (!address.startsWith('http') && !address.startsWith('HTTP')) {
-            	urlToCall = SERVER_URL + address;
+            if (address.indexOf('http') === 0 || address.indexOf('HTTP') === 0) {
+                 if (loggingEnabled && writeToLog) {
+                    console.log("Using absolute URL");
+                 }
+                urlToCall = SERVER_URL + address;
             }
             
             if (callType == "FILE") {
-            	var getParams = ko.toJSON(params);
-            	urlToCall += "?data=" + getParams;
-            	window.location = urlToCall;
-            	hideLoading();
-            	return;
+                var getParams = ko.toJSON(params);
+                urlToCall += "?data=" + getParams;
+                window.location = urlToCall;
+                hideLoading();
+                return;
             }
-            
-            currentServerCall = $.ajax({
-                type: 'POST',
-                dataType: 'json',
-                data: { data: ko.toJSON(params)},
+
+            if (typeof jquery  === 'undefined') {
+                throw "Can't fallback on ajax since jquery is not defined"
+            }
+            //fallback ajax post
+            currentServerCall = jquery.ajax({
+                type: callType === 'GET' ? 'GET' : 'POST',
+                dataType: dataType,
+                data: ko.toJSON(params),
                 url: urlToCall,
                 timeout: timeout,
-                contentType: "application/x-www-form-urlencoded; charset=utf-8", //application/json
+                contentType: contentType + "; charset=" + charset, //
                 complete: function () {
                     isBusy = false;
                     //hideLoading();
@@ -518,11 +662,15 @@ function serverPrototype() {
                     if (data != null) {
                         handleSuccess(orgCallData, address, data, offlineKey, writeToLog, errorElementId, successHandler, exceptionHandler);
                         if (hideLoadingOnSuccess) {
-                            hideLoading();
+                            if (hideLoadingDelegate) {
+                                hideLoadingDelegate();
+                            }
                         }
                     }
                     else {
-                        hideLoading();
+                        if (hideLoadingDelegate) {
+                            hideLoadingDelegate();
+                        }
                     }
 
                 },
@@ -542,73 +690,26 @@ function serverPrototype() {
 
                 }
             });
+},
+getOfflinePackageSize: function () {
+    return offlinePackage.length;
+},
+getOfflinePackage: function () {
+            return offlinePackage.slice(0); //clone it
         },
-        handleError: function (data, elementId) {
-            internalHandleError(data, elementId);
-        },
-        getOfflinePackageSize: function () {
-        	return offlinePackage.size();
-        },
-        getOfflinePackage: function () {
-            return offlinePackage;
-        },
-        sendOfflineItem: function (index) {
-            var item = server.getOfflinePackage().item(index);
+        
+goOnline: function () {
 
-            if (item == null) {
-            	if (offlineChangesAppliedDelegate) {
-                    offlineChangesAppliedDelegate();
+            //first of all check that we have internet connectivity
+            if (onAppOnlineDelegate) {
+                if (!onAppOnlineDelegate()) {
+                    return;
                 }
-                return;
             }
-
-            server.call(
-                    {
-                        callType: "POST",
-                        availableOffline: false,
-                        address: item.address,
-                        params: item.params,
-                        waitMessage: "gen_saving",
-                        writeToLog: false,
-                        successHandler: function (data) {
-                            console.log("Offline item: " + inspectObject(item) + " went though successfully.");
-
-                            //ok the item went through...remove it from the source
-                            server.getOfflinePackage().remove(index);
-
-                            //then start with the next one...should be the same index
-                            server.sendOfflineItem(index);
-                        },
-                        exceptionHandler: function (exception, elementId) {
-                            console.log("Offline item: " + inspectObject(item) + " failed miserably.");
-
-                            //OPTION 1: try with the next one
-                            //server.sendOfflineItem(index++, context);
-
-                            //OPTION 2: remove and take the next one
-                            server.getOfflinePackage().remove(index);
-                            //then start with the next one...should be the same index
-                            server.sendOfflineItem(index);
-                        },
-                        unhandledErrorHandler: function (param1, param2, param3) {
-                            console.log("Unhandled exception occurred while sending offline package to server: " + inspectObject(param1));
-                            server.sendOfflineItem(index++);
-                        }
-                    }
-                );
-        },
-        goOnline: function () {
-        	
-        	//first of all check that we have internet connectivity
-        	if (onAppOnlineDelegate) {
-        		if (!onAppOnlineDelegate()) {
-            		return;
-            	}
-            }
-        	
+            
             if (this.isOffline) {
-            	console.log("Clearing all cache");
-                clearCache();	
+                console.log("Clearing all cache");
+                clearCache();   
             }
             
             console.log("Server is now online");
@@ -616,19 +717,26 @@ function serverPrototype() {
             trySendOfflinePackage();
         },
         goOffline: function () {
-        	console.log("Server is now offline");
+            console.log("Server is now offline");
             this.isOffline = true;
             if (onAppOfflineDelegate) {
-            	onAppOfflineDelegate();
+                onAppOfflineDelegate();
             }
         },
         isOnline: function () {
             return !this.isOffline;
         },
-        abortPreviousServerCalls: function () {
-            abortAnyPendingServerCalls();
-        },
         init: function (settings) {
+
+            if (typeof settings === 'undefined' || settings === null) {
+                throw "No settings passed in";
+            }
+
+            if (typeof settings.serverUrl === 'undefined' || settings.serverUrl === null) {
+                settings.serverUrl = "/";
+            }
+
+            SERVER_URL = settings.serverUrl;
             serviceUseCache = settings.useCache;
             serviceDependencies = settings.dependencies;
             serviceNotificationDelegate = settings.notificationDelegate;
@@ -640,12 +748,82 @@ function serverPrototype() {
             beforeServerCallDelegate = settings.beforeServerCallDelegate;
             onAppOnlineDelegate = settings.onAppOnlineDelegate;
             onAppOfflineDelegate = settings.onAppOfflineDelegate;
+            
+            if (settings.availableServices) {
+                allServices = settings.availableServices;
+            }
+
+            if (typeof $  !== 'undefined') {
+                if (typeof($.connection) !== 'undefined' && $.connection.hub) {
+                    $.connection.hub.logging = false;
+
+                    $.connection.hub.stateChanged(function (change) {
+                        if (change.newState === $.signalR.connectionState.reconnecting) {
+                            console.log('Client re-connecting');
+                        }
+                        else if (change.newState === $.signalR.connectionState.connected) {
+                            console.log('The server is online');
+                        }
+                        else {
+                            console.log('new state = ' + change.newState);
+                        }
+                    });
+
+                    $.connection.hub.error(function (error) {
+                        //unhandled signalr exception...
+                        showErrorMsg("A connection problem occurred during the last operation", "error");
+
+                        //call the normal unhandled error handler
+                        if (unhandledErrorDelegate) {
+                            unhandledErrorDelegate("SignalR", {}, {}, error);
+                        }
+
+                    });
+
+                    $.connection.hub.starting = function () {
+                        console.log("on starting");
+                    };
+
+                    $.connection.hub.received = function () {
+                        console.log("on received");
+                    };
+
+                    $.connection.hub.connectionSlow = function () {
+                        console.log("on connection slow");
+                        //let the user know that we are having some problems with the connection
+                    };
+
+                    $.connection.hub.reconnecting = function () {
+                        console.log("on reconnecting");
+                    };
+
+                    $.connection.hub.reconnected(function () {
+                        console.log('Client reconnected');
+                    });
+
+                    $.connection.hub.disconnected(function () {
+
+                    });
+            }
         }
+        if (settings.techUsed) {
+            techUsed = settings.techUsed;
+        }
+
+        if (!settings.loggingEnabled) {
+            loggingEnabled = false;
+        }
+        else {
+            loggingEnabled = true;
+        }
+        showLoadingDelegate = settings.showLoadingDelegate;
+        hideLoadingDelegate = settings.hideLoadingDelegate;
     }
 }
+}
 
-var server = serverPrototype();
-    
+window.server = serverPrototype();
+
 
 
 
