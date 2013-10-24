@@ -8,5 +8,7 @@ require.config({
 require(["server"], function(server) {
 
 	console.log("server has been initialized");
-	console.log("Server: " + server);
+	
+	window.server = server;
+
 });
