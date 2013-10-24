@@ -1,0 +1,7 @@
+{
+    "server": {
+        "dependencies": {
+            "jquery": "scripts/vendor/jquery/jquery"
+        }
+    }
+}
