@@ -43,6 +43,7 @@
 
     //function serverPrototype() {
 
+        var modules = null;
         var SERVER_URL = "/";
         var serviceNotificationDelegate = null;
         var serviceErrorDelegate = null;
@@ -78,14 +79,6 @@
         if (offlineItems !== null) {
             offlinePackage.concat(offlineItems);
         }
-
-        var abortAnyPendingServerCalls = function () {
-            if (currentServerCall && currentServerCall.readyState != 4) {
-                currentServerCall.abort();
-                currentServerCall = null;
-            }
-            isBusy = false;
-        };
 
         var handleSuccess = function (orgCall, address, data, offlineKey, writeToLog, errorElementId, successHandler, exceptionHandler) {
 
@@ -384,64 +377,55 @@
         * writeToLog: If the data returned from the server should be written to the console log
         * successHandler: The function to call when a successful call to the server was made and the operation was a success. You get the data returned as as parameter
         * errorHandler: The function to call when an unhandled error occurred (You get the normal ajax error params:jqXHR, textStatus, errorThrown )
-        *
-        * Example:
-        {
-        callType: "GET",
-        availableOffine: true,
-        address: 'address',
-        params: {json object},
-        waitMessage: 'waiting',
-        writeToLog: true,
-        successHandler: func,
-        exceptionHandler: func,
-        unhandledErrorHandler: func,
-        hideLoadingOnSuccess: default (false), if the loading screen should be closed on a success return from the server,
-        forceUpdate: default(false) force a call to the server
-        }
-    
-        *
         */
         call: function (data) {
-            var callType = data.callType;
-            var availableOffline = data.availableOffline;
-            var address = data.address;
-            var params = data.params;
-            var waitMessage = data.waitMessage;
-            var writeToLog = data.writeToLog;
+            
+            var hideLoadingOnSuccess = true;
             var successHandler = data.successHandler;
             var exceptionHandler = data.exceptionHandler;
             var unhandledErrorHandler = data.unhandledErrorHandler;
-            var hideLoadingOnSuccess = true;
+            var writeToLog = data.writeToLog;
             var forceUpdate = false;
-            var execNative = false;
-            var errorContainer = null;
-            var offlineHandler = data.offlineHandler;
-            var timeout = data.timeout;
+            var availableOffline = data.availableOffline;
             var techToUseForThisCall = techUsed;
-            var serverMethodToCall = data.serverMethod;
-            var charset = data.charset;
-            var contentType = data.contentType;
-            var dataType = data.dataType;
+            
+            var settings = {
+                callType: data.callType,
+                address: data.address,
+                params: data.params,
+                waitMessage: data.waitMessage,
+                errorContainer: null,
+                offlineHandler: data.offlineHandler,
+                timeout: data.timeout,
+                serverMethodToCall: data.serverMethod,
+                charset: data.charset,
+                contentType: data.contentType,
+                dataType: data.dataType
+            };
+            
 
-            if (typeof address === 'undefined' || address === null || address.constructor !== String) {
+            if (typeof settings.modules === 'undefined' || settings.modules === null) {
+                throw "You must call init at startup to configure the server component";
+            }
+
+            if (typeof settings.address === 'undefined' || settings.address === null || settings.address.constructor !== String) {
                 throw "address not set or is not a string";
             }
 
-            if (typeof params === 'undefined' || params === null) {
-                params = {};
+            if (typeof settings.params === 'undefined' || settings.params === null) {
+                settings.params = {};
             }
 
-            if (typeof charset === 'undefined' || charset === null) {
-                charset = "utf-8";
+            if (typeof settings.charset === 'undefined' || settings.charset === null) {
+                settings.charset = "utf-8";
             }
 
-            if (typeof contentType === 'undefined' || contentType === null) {
-                contentType = "application/json";
+            if (typeof settings.contentType === 'undefined' || settings.contentType === null) {
+                settings.contentType = "application/json";
             }
 
-            if (typeof dataType === 'undefined' || dataType === null) {
-                dataType = "json";
+            if (typeof settings.dataType === 'undefined' || settings.dataType === null) {
+                settings.dataType = "json";
             }
 
             if (beforeServerCallDelegate) {
@@ -455,8 +439,8 @@
                 techToUseForThisCall = data.useTech;
             }
 
-            if (!timeout) {
-                timeout = 60000;
+            if (!settings.timeout) {
+                settings.timeout = 60000;
             }
 
             if (!writeToLog) {
@@ -468,7 +452,7 @@
             }
 
             if (data.errorContainer) {
-                errorContainer = data.errorContainer;
+                settings.errorContainer = data.errorContainer;
             }
             
             if (data.forceUpdate || !serviceUseCache) {
@@ -482,21 +466,39 @@
 
             if (isBusy) {
                 if (writeToLog) {
-                    console.log("Aborting previous server call.");
+                    console.log("Starting new call while previous has not finished");
                 }
-                abortAnyPendingServerCalls();
-                //return;
+            }
+
+            //try and find a module we can use
+
+            var callModuleToUse = null;
+            for (var i = 0; i < modules.length; i++) {
+                if (typeof modules[i].run === 'undefined') {
+                    console.log("Module is missing run method");
+                    continue;
+                }
+
+                if (typeof modules[i].name === 'undefined') {
+                    console.log("Module is missing name");
+                    continue;
+                }
+
+                if (techToUseForThisCall === modules[i].name) {
+                    callModuleToUse = modules[i];
+                    break;
+                }
+            };
+
+            if (callModuleToUse === null) {
+                throw "No module found to make the call, make sure this has been setup when calling init (Module name must match the techUsed parameter)";
             }
 
             var errorElementId = errorContainer;
 
             var offlineKey = null;
-
-            if (data.execNative) {
-                execNative = data.execNative;
-            }
-            
-            //if a funtion is set to force update we still allow it to read from cache of the server is offline
+ 
+            //if a funtion is set to force update we still allow it to read from cache if the server is offline
             if (!forceUpdate || !server.isOnline()) { //ALWAYS TRY TO USE THE CACHE
 
                 if (!availableOffline && !server.isOnline()) {
@@ -520,7 +522,7 @@
 
                 var offlineResp = tryHandleOffline(callType, address, params, writeToLog, successHandler);
                 if (offlineResp.handledOffline) {
-                    if (callType != "POST") { //if post then we just added a package to be send later
+                    if (callType != "POST") { //if post then we just added a package to be sent later
 
                         handleSuccess(data, address, offlineResp.data, null, writeToLog, errorElementId, successHandler, exceptionHandler);
                     }
@@ -571,117 +573,23 @@
 
             if (loggingEnabled && writeToLog) {
                 console.log("Calling server method: " + address + ". With params: ");
-                console.log(params);  
+                console.log(params);
             }
             isBusy = true;
             var _this = this;
             var orgCallData = data;
             
-            if (data.execNative) {
-
-                if (!BROWSER) {
-                    params.address = SERVER_URL + address;
-                    window.plugins.serverRequest.post(params, function(data) {
-                        isBusy = false;
-                        if (data != null) {
-                            handleSuccess(orgCallData, address, data, offlineKey, writeToLog, errorElementId, successHandler, exceptionHandler);
-                            if (hideLoadingOnSuccess) {
-                                if (hideLoadingDelegate) {
-                                    hideLoadingDelegate();
-                                }
-                            }
-                        }
-                        else {
-                            if (hideLoadingDelegate) {
-                                hideLoadingDelegate();
-                            }
-                        }
-                    }, function(data) {
-                        if (hideLoadingDelegate) {
-                            hideLoadingDelegate();
-                        }
-                    });
-                    return;
-                }
-            }
-            
-            if (techToUseForThisCall == 'signalr') {
-                if (!serverMethodToCall) {
-                    console.log("ERROR - you have not defined serverMethod for the server.call method so there is no method to call on the server side.");
-                    return;
-                }
-
-                serverMethodToCall(params).done(function (data) {
-                    isBusy = false;
-                    if (data != null) {
-                        handleSuccess(orgCallData, address, data, offlineKey, writeToLog, errorElementId, successHandler, exceptionHandler);
-                        if (hideLoadingOnSuccess) {
-                            if (hideLoadingDelegate) {
-                                hideLoadingDelegate();
-                            }
-                        }
-                    }
-                    else {
-                        if (hideLoadingDelegate) {
-                            hideLoadingDelegate();
-                        }
-                    }
-                }).fail(function (errorThrown) {
-                    isBusy = false;
-                    if (hideLoadingDelegate) {
-                        hideLoadingDelegate();
-                    }
-
-                    if (!unhandledErrorHandler) {
-                        if (unhandledErrorDelegate) {
-                            unhandledErrorDelegate(errorThrown, address);
-                        }
-                        else {
-                            console.log("SERVER UNHANDLED ERROR (You should assign an unhandled error delegate): " + textStatus);
-                        }
-                    }
-                    else {
-                        unhandledErrorHandler(errorThrown);
-                    }
-                });
-
-                return;
-            }
-            
             var urlToCall = SERVER_URL + address;
             if (address.indexOf('http') === 0 || address.indexOf('HTTP') === 0)
             {
-             if (loggingEnabled && writeToLog) {
-                console.log("Using absolute URL");
-              }
+                if (loggingEnabled && writeToLog) {
+                    console.log("Using absolute URL");
+                }
             
-            urlToCall = address;
+                urlToCall = address;
             }
 
-        if (callType == "FILE") {
-            var getParams = JSON.stringify(params);
-            urlToCall += "?data=" + getParams;
-            window.location = urlToCall;
-            hideLoading();
-            return;
-        }
-
-        if (typeof jQuery  === 'undefined') {
-            throw "Can't fallback on ajax since jquery is not defined";
-        }
-            //fallback ajax post
-            currentServerCall = jQuery.ajax({
-                type: callType === 'GET' ? 'GET' : 'POST',
-                dataType: dataType,
-                data: JSON.stringify(params),
-                url: urlToCall,
-                timeout: timeout,
-                contentType: contentType + "; charset=" + charset, //
-                complete: function () {
-                    isBusy = false;
-                    //hideLoading();
-                },
-                success: function (data, textStatus, jqXHR) {
+            var onSuccess = function(data) {
                     isBusy = false;
                     if (data != null) {
                         handleSuccess(orgCallData, address, data, offlineKey, writeToLog, errorElementId, successHandler, exceptionHandler);
@@ -696,24 +604,24 @@
                             hideLoadingDelegate();
                         }
                     }
+            };
 
-                },
-                error: function (jqXHR, textStatus, errorThrown) {
-                    isBusy = false;
+            var onFailure = function(msg) {
+                isBusy = false;
                     if (!unhandledErrorHandler) {
                         if (unhandledErrorDelegate) {
-                            unhandledErrorDelegate(jqXHR.status + " : " + jqXHR.statusText, address);
+                            unhandledErrorDelegate(msg, address);
                         }
                         else {
                             console.log("SERVER UNHANDLED ERROR (You should assign an unhandled error delegate): " + textStatus);
                         }
                     }
                     else {
-                        unhandledErrorHandler(jqXHR.status + " : " + jqXHR.statusText);
+                        unhandledErrorHandler(msg);
                     }
+            };
 
-                }
-            });
+            callModuleToUse.run(params, settings, onSuccess, onFailure);
 },
 getOfflinePackageSize: function () {
     return offlinePackage.length;
@@ -779,10 +687,15 @@ getOfflinePackage: function () {
                 throw "No settings passed in";
             }
 
+            if (typeof settings.modules === 'undefined' || settings.modules === null) {
+                throw "At least 1 module for handling calls must be added";
+            }
+
             if (typeof settings.serverUrl === 'undefined' || settings.serverUrl === null) {
                 settings.serverUrl = "/";
             }
 
+            modules = settings.modules;
             SERVER_URL = settings.serverUrl;
             serviceUseCache = settings.useCache;
             serviceDependencies = settings.dependencies;
