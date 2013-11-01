@@ -1,21 +1,91 @@
+//a function that takes 2 parameters, the root object and a factory
+//this function is directly called with a window or node as the root parameter
+//and our server implementation as an anonymous function taking a jQuery object as parameter
+
+//if define is defined the we return our server implementation by calling it with require jquery
+//if not, then we call our server implemenation and hope that the root object has jQuery defined.
+//We then set our server implementation on the root object.
+
 (function (root, factory) {
     if (typeof define === 'function' && define.amd) {
         // AMD. Register as an anonymous module.
-        define(['jquery'], factory); // expects that jquery has been defined somewhere 
+        define(['jquery', 'localStorage'], factory); // expects that jquery has been defined somewhere 
     } else {
         // Browser globals
-        root.server = factory(root.jQuery);
+        root.server = factory(root.jQuery, root.localStorage);
     }
-}(this, function (jQuery) {
+}(this, function (jQuery, localStorage) {
     // Just return a value to define the module export.
     // This example returns an object, but the module
     // can return a function as the exported value.
 
-    var hashFunc = function() {
+    var _this = this;
+    var modules = null;
+    var SERVER_URL = "/";
+    var serviceNotificationDelegate = null;
+    var serviceErrorDelegate = null;
+    var unhandledErrorDelegate = null;
+    var messageDelegate = null;
+    var offlineChangesAppliedDelegate = null;
+    var offlineChangesAddedDelegate = null;
+    var beforeServerCallDelegate = null;
+    var onAppOfflineDelegate = null;
+    var onAppOnlineDelegate = null;
+    var techUsed = 'ajax';
+    var loggingEnabled = true;
+    var serviceUseCache = true;
+    var offlineItems = null;
+    var showLoadingDelegate = null;
+    var hideLoadingDelegate = null;
+    var currentServerCall = null;
+    var isOffline = false;
+    var allServices = [];
+    var serviceDependencies = [];
+    var isBusy = false;
+
+    if (typeof localStorage === 'undefined') {
+        localStorage = (function() {
+            
+            var storage = {};
+
+            return {
+                getItem: function(key) {
+                    var val = storage[key];
+                    if (typeof val === 'undefined') {
+                        return null;
+                    }
+                    return val;
+                },
+                setItem: function(key, value) {
+                    storage[key] = value;
+                },
+                removeItem: function(key) {
+                    storage[key] = null;
+                }
+            };
+        })();
+    }
+
+    try {
+        var offlineItemsAsString = localStorage.getItem("offlinePackage");
+        if (offlineItemsAsString !== null) {
+            offlineItems = JSON.parse(offlineItemsAsString);
+        }
+    } catch (e) {
+        console.log("Failed to read offlinePackage from local storage: " + e);
+    }
+
+    var offlinePackage = [];
+    if (offlineItems !== null) {
+        offlinePackage.concat(offlineItems);
+    }
+
+    //PRIVATE SCOPE
+    var hashFunc = function(input) {
         var hash = 0, i, char;
-        if (this.length === 0) return hash;
-        for (i = 0, l = this.length; i < l; i++) {
-            char  = this.charCodeAt(i);
+        if (input.length === 0) return hash;
+        for (i = 0, l = input.length; i < l; i++) {
+            char  = input.charCodeAt(i);
             hash  = ((hash<<5)-hash)+char;
             hash |= 0; // Convert to 32bit integer
         }
@@ -41,46 +111,7 @@
         };
     };
 
-    //function serverPrototype() {
-
-        var modules = null;
-        var SERVER_URL = "/";
-        var serviceNotificationDelegate = null;
-        var serviceErrorDelegate = null;
-        var unhandledErrorDelegate = null;
-        var messageDelegate = null;
-        var offlineChangesAppliedDelegate = null;
-        var offlineChangesAddedDelegate = null;
-        var beforeServerCallDelegate = null;
-        var onAppOfflineDelegate = null;
-        var onAppOnlineDelegate = null;
-        var techUsed = 'ajax';
-        var loggingEnabled = true;
-        var serviceUseCache = true;
-        var offlineItems = null;
-        var showLoadingDelegate = null;
-        var hideLoadingDelegate = null;
-        var currentServerCall = null;
-        var isOffline = false;
-        var allServices = [];
-        var serviceDependencies = [];
-        var isBusy = false;
-
-        try {
-            var offlineItemsAsString = localStorage.getItem("offlinePackage");
-            if (offlineItemsAsString !== null) {
-                offlineItems = JSON.parse(offlineItemsAsString);
-            }
-        } catch (e) {
-            console.log("Failed to read offlinePackage from local storage: " + e);
-        }
-
-        var offlinePackage = [];
-        if (offlineItems !== null) {
-            offlinePackage.concat(offlineItems);
-        }
-
-        var handleSuccess = function (orgCall, address, data, offlineKey, writeToLog, errorElementId, successHandler, exceptionHandler) {
+        var handleSuccess = function (serverObj, orgCall, address, data, offlineKey, writeToLog, errorElementId, successHandler, exceptionHandler) {
 
             var wasHandledUsingCache = (offlineKey === null && orgCall.callType === "GET");
 
@@ -133,7 +164,7 @@
         
 
         /* Do we need to update our cache?...never remove cache if we are in offline mode since thats the only data we have to work with */
-        if (server.isOnline() && !wasHandledUsingCache) {
+        if (serverObj.isOnline() && !wasHandledUsingCache) {
             for (var i = 0; i < serviceDependencies.length; i++) {
                 var dependency = serviceDependencies[i];
                 if (dependency.name == address) {
@@ -203,7 +234,7 @@
     };
 
     var sendOfflineItem = function (index) {
-        var item = server.getOfflinePackage().item(index);
+        var item = _this.getOfflinePackage().item(index);
 
         if (item === null) {
             if (offlineChangesAppliedDelegate) {
@@ -212,7 +243,7 @@
             return;
         }
 
-        server.call(
+        _this.call(
         {
             callType: "POST",
             availableOffline: false,
@@ -224,28 +255,28 @@
                 console.log("Offline item: " + item + " went though successfully.");
 
                             //ok the item went through...remove it from the source
-                            server.getOfflinePackage().splice(index, 1);
+                            _this.getOfflinePackage().splice(index, 1);
 
                             //then start with the next one...should be the same index
-                            server.sendOfflineItem(index);
+                            _this.sendOfflineItem(index);
                         },
                         exceptionHandler: function (exception, elementId) {
                             console.log("Offline item: " + item + " failed miserably.");
 
                             //OPTION 1: try with the next one
-                            //server.sendOfflineItem(index++, context);
+                            //this.sendOfflineItem(index++, context);
 
                             //OPTION 2: remove and take the next one
-                            server.getOfflinePackage().slice(index, 1);
+                            _this.getOfflinePackage().slice(index, 1);
                             //then start with the next one...should be the same index
-                            server.sendOfflineItem(index);
+                            _this.sendOfflineItem(index);
                         },
                         unhandledErrorHandler: function (param1, param2, param3) {
                             console.log("Unhandled exception occurred while sending offline package to server: " + param1);
-                            server.sendOfflineItem(index++);
+                            _this.sendOfflineItem(index++);
                         }
                     });
-};
+    };
 
     /*
     * CallType: [GET or POST:string]
@@ -324,7 +355,7 @@
         }
         else if (callType == "POST") {
             //ok. lets try and add this to our current package
-            if (!server.isOnline()) {
+            if (!_this.isOnline()) {
 
                 //if the server is offline then handled offline should always be true
                 try {
@@ -359,13 +390,15 @@
     var trySendOfflinePackage = function () {
         if (offlinePackage.length > 0) {
             console.log("Sending " + offlinePackage.length + " cached calls to the server.");
-            server.sendOfflineItem(0);
+            _this.sendOfflineItem(0);
             
         }
         else {
             console.log("Offline package is empty. Send aborted");
         }
     };
+
+    //PUBLIC SCOPE
 
     return {
         /*
@@ -404,12 +437,12 @@
             };
             
 
-            if (typeof settings.modules === 'undefined' || settings.modules === null) {
-                throw "You must call init at startup to configure the server component";
+            if (typeof modules === 'undefined' || modules === null) {
+                throw new Error("You must call init at startup to configure the server component");
             }
 
             if (typeof settings.address === 'undefined' || settings.address === null || settings.address.constructor !== String) {
-                throw "address not set or is not a string";
+                throw new Error("address not set or is not a string");
             }
 
             if (typeof settings.params === 'undefined' || settings.params === null) {
@@ -435,8 +468,8 @@
                 }
             }
             
-            if (data.useTech) {
-                techToUseForThisCall = data.useTech;
+            if (data.useModule) {
+                techToUseForThisCall = data.useModule;
             }
 
             if (!settings.timeout) {
@@ -474,6 +507,7 @@
 
             var callModuleToUse = null;
             for (var i = 0; i < modules.length; i++) {
+
                 if (typeof modules[i].run === 'undefined') {
                     console.log("Module is missing run method");
                     continue;
@@ -488,20 +522,20 @@
                     callModuleToUse = modules[i];
                     break;
                 }
-            };
-
-            if (callModuleToUse === null) {
-                throw "No module found to make the call, make sure this has been setup when calling init (Module name must match the techUsed parameter)";
             }
 
-            var errorElementId = errorContainer;
+            if (callModuleToUse === null) {
+                throw new Error("No module found to make the call, make sure this has been setup when calling init (Module name must match the techUsed parameter)");
+            }
+
+            var errorElementId = settings.errorContainer;
 
             var offlineKey = null;
  
             //if a funtion is set to force update we still allow it to read from cache if the server is offline
-            if (!forceUpdate || !server.isOnline()) { //ALWAYS TRY TO USE THE CACHE
+            if (!forceUpdate || !this.isOnline()) { //ALWAYS TRY TO USE THE CACHE
 
-                if (!availableOffline && !server.isOnline()) {
+                if (!availableOffline && !this.isOnline()) {
 
                     var offlineHandlerTookCareOfIt = false;
                     if (offlineHandler != null) {
@@ -520,11 +554,10 @@
                     return;
                 }
 
-                var offlineResp = tryHandleOffline(callType, address, params, writeToLog, successHandler);
+                var offlineResp = tryHandleOffline(callType, settings.address, settings.params, writeToLog, successHandler);
                 if (offlineResp.handledOffline) {
                     if (callType != "POST") { //if post then we just added a package to be sent later
-
-                        handleSuccess(data, address, offlineResp.data, null, writeToLog, errorElementId, successHandler, exceptionHandler);
+                        handleSuccess(this, data, settigns.address, offlineResp.data, null, writeToLog, errorElementId, successHandler, exceptionHandler);
                     }
                     else {
                         if (offlineHandler != null) {
@@ -539,12 +572,12 @@
             }
             else {
                 //we still need a key that we can update 
-                offlineKey = new OfflineKey(address, params);
+                offlineKey = new OfflineKey(settings.address, settings.params);
             }
 
             //the call could not be handled offline...
             
-            if (!server.isOnline()) {
+            if (!this.isOnline()) {
                 //if the server is not online, let see if there is an offline handler ... if not then lets show a message
                 var offlineHandlerTookCareOfIt = false;
                 if (offlineHandler != null) {
@@ -561,38 +594,32 @@
                 return;
             }
 
-            if (waitMessage != null && showLoadingDelegate) {
-                var localized = Globalize.localize(waitMessage);
-                if (localized) {
-                    showLoadingDelegate(localized);
-                }
-                else {
-                    showLoadingDelegate(waitMessage);
-                }
+            if (settings.waitMessage != null && showLoadingDelegate) {
+                showLoadingDelegate(settings.waitMessage);
             }
 
             if (loggingEnabled && writeToLog) {
-                console.log("Calling server method: " + address + ". With params: ");
+                console.log("Calling server method: " + settings.address + ". With params: ");
                 console.log(params);
             }
             isBusy = true;
             var _this = this;
             var orgCallData = data;
             
-            var urlToCall = SERVER_URL + address;
-            if (address.indexOf('http') === 0 || address.indexOf('HTTP') === 0)
+            var urlToCall = SERVER_URL + settings.address;
+            if (settings.address.indexOf('http') === 0 || settings.address.indexOf('HTTP') === 0)
             {
                 if (loggingEnabled && writeToLog) {
                     console.log("Using absolute URL");
                 }
             
-                urlToCall = address;
+                urlToCall = settings.address;
             }
 
             var onSuccess = function(data) {
                     isBusy = false;
                     if (data != null) {
-                        handleSuccess(orgCallData, address, data, offlineKey, writeToLog, errorElementId, successHandler, exceptionHandler);
+                        handleSuccess(_this, orgCallData, settings.address, data, offlineKey, writeToLog, errorElementId, successHandler, exceptionHandler);
                         if (hideLoadingOnSuccess) {
                             if (hideLoadingDelegate) {
                                 hideLoadingDelegate();
@@ -610,7 +637,7 @@
                 isBusy = false;
                     if (!unhandledErrorHandler) {
                         if (unhandledErrorDelegate) {
-                            unhandledErrorDelegate(msg, address);
+                            unhandledErrorDelegate(msg, settings.address);
                         }
                         else {
                             console.log("SERVER UNHANDLED ERROR (You should assign an unhandled error delegate): " + textStatus);
@@ -621,7 +648,7 @@
                     }
             };
 
-            callModuleToUse.run(params, settings, onSuccess, onFailure);
+            callModuleToUse.run(settings.params, settings, onSuccess, onFailure);
 },
 getOfflinePackageSize: function () {
     return offlinePackage.length;
@@ -639,24 +666,24 @@ getOfflinePackage: function () {
                 }
             }
             
-            if (this.isOffline) {
+            if (_this.isOffline) {
                 console.log("Clearing all cache");
                 clearCache();
             }
             
             console.log("Server is now online");
-            this.isOffline = false;
+            _this.isOffline = false;
             trySendOfflinePackage();
         },
         goOffline: function () {
             console.log("Server is now offline");
-            this.isOffline = true;
+            _this.isOffline = true;
             if (onAppOfflineDelegate) {
                 onAppOfflineDelegate();
             }
         },
         isOnline: function () {
-            return !this.isOffline;
+            return !_this.isOffline;
         },
         defaultInput: {
             callType : 'GET',
@@ -684,15 +711,19 @@ getOfflinePackage: function () {
         init: function (settings) {
 
             if (typeof settings === 'undefined' || settings === null) {
-                throw "No settings passed in";
+                throw new Error("No settings passed in");
             }
 
             if (typeof settings.modules === 'undefined' || settings.modules === null) {
-                throw "At least 1 module for handling calls must be added";
+                throw new Error("At least 1 module for handling calls must be added");
             }
 
             if (typeof settings.serverUrl === 'undefined' || settings.serverUrl === null) {
                 settings.serverUrl = "/";
+            }
+
+            if (typeof settings.dependencies === 'undefined' || settings.dependencies === null) {
+                settings.dependencies = [];
             }
 
             modules = settings.modules;
@@ -780,7 +811,6 @@ getOfflinePackage: function () {
             hideLoadingDelegate = settings.hideLoadingDelegate;
         }
     };
-//}
 }));
 
 
