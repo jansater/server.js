@@ -1,6 +1,6 @@
 require.config({
 	"paths" : {
-		"jquery" : "vendor/jquery/jquery",
+		"jQuery" : "vendor/jquery/jquery",
 		"server" : "vendor/server/server",
 		"ajaxModule" : "modules/ajaxModule",
 		"fileModule" : "modules/fileModule",

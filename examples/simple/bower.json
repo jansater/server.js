@@ -2,7 +2,7 @@
 	"name" : "Server.js Test",
 	"version" : "1.0.0",
 	"dependencies" : {
-		"jquery" : null,
+		"jQuery" : null,
 		"requirejs" : null,
 		"server" : "https://github.com/jansater/server.js.git"
 	}

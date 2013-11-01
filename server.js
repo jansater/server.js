@@ -9,7 +9,7 @@
 (function (root, factory) {
     if (typeof define === 'function' && define.amd) {
         // AMD. Register as an anonymous module.
-        define(['jquery'], factory); // expects that jquery has been defined somewhere 
+        define(['jQuery'], factory); // expects that jquery has been defined somewhere 
     } else {
         // Browser globals
         root.server = factory(root.jQuery);
