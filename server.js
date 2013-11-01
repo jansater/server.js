@@ -9,12 +9,12 @@
 (function (root, factory) {
     if (typeof define === 'function' && define.amd) {
         // AMD. Register as an anonymous module.
-        define(['jquery', 'localStorage'], factory); // expects that jquery has been defined somewhere 
+        define(['jquery'], factory); // expects that jquery has been defined somewhere 
     } else {
         // Browser globals
-        root.server = factory(root.jQuery, root.localStorage);
+        root.server = factory(root.jQuery);
     }
-}(this, function (jQuery, localStorage) {
+}(this, function (jQuery) {
     // Just return a value to define the module export.
     // This example returns an object, but the module
     // can return a function as the exported value.
@@ -42,8 +42,8 @@
     var allServices = [];
     var serviceDependencies = [];
     var isBusy = false;
-
-    if (typeof localStorage === 'undefined') {
+    var localStorage = null;
+    if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
         localStorage = (function() {
             
             var storage = {};
@@ -64,6 +64,9 @@
                 }
             };
         })();
+    }
+    else {
+        localStorage = window.localStorage;
     }
 
     try {
