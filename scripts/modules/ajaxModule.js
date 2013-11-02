@@ -1,4 +1,4 @@
-define(["jQuery"], function(jQuery) {
+define(["jquery"], function(jQuery) {
 
 	if (typeof jQuery  === 'undefined') {
        throw "Can't use ajax call since jquery is not defined";
