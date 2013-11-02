@@ -1,7 +1,7 @@
 {
     "server": {
         "dependencies": {
-            "jQuery": "scripts/vendor/jquery/jquery"
+            "jquery": "scripts/vendor/jquery/jquery"
         }
     }
 }

@@ -1,4 +1,4 @@
-define(["jquery"], function(jQuery) {
+define(["jQuery"], function(jQuery) {
 
 	if (typeof jQuery  !== 'undefined') {
 		if (typeof(jQuery.connection) !== 'undefined' && jQuery.connection.hub) {
