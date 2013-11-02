@@ -2,6 +2,6 @@
 	"name" : "server.js",
 	"version" : "0.0.2",
 	"dependencies" : {
-		"jquery" : null
+		"jQuery" : null
 	}
 }
