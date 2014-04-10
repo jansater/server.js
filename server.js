@@ -643,7 +643,7 @@
                             unhandledErrorDelegate(msg, settings.address);
                         }
                         else {
-                            console.log("SERVER UNHANDLED ERROR (You should assign an unhandled error delegate): " + textStatus);
+                            console.log("SERVER UNHANDLED ERROR (You should assign an unhandled error delegate): " + msg);
                         }
                     }
                     else {

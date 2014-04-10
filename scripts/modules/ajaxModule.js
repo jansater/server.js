@@ -11,7 +11,7 @@ define(["jquery"], function(jQuery) {
 					type: parameters.callType === 'GET' ? 'GET' : 'POST',
 					dataType: parameters.dataType,
 					data: JSON.stringify(data),
-					url: parameters.urlToCall,
+					url: parameters.address,
 					timeout: parameters.timeout,
 					contentType: parameters.contentType + "; charset=" + parameters.charset,
 					success: function(data, textStatus, jqXHR) {
