@@ -1,7 +1,7 @@
 define([], function() {
 
 	//we want to return an object that has a call run method
-	var module = function() {
+	
 		return {
 			name: "file",
 			run: function(input, parameters, onSuccess, onError) {
@@ -10,6 +10,5 @@ define([], function() {
 				window.location = urlToCall;
 			}
 		};
-	};
-	return module;
+	
 });

@@ -557,10 +557,10 @@
                     return;
                 }
 
-                var offlineResp = tryHandleOffline(callType, settings.address, settings.params, writeToLog, successHandler);
+                var offlineResp = tryHandleOffline(settings.callType, settings.address, settings.params, writeToLog, successHandler);
                 if (offlineResp.handledOffline) {
                     if (callType != "POST") { //if post then we just added a package to be sent later
-                        handleSuccess(this, data, settigns.address, offlineResp.data, null, writeToLog, errorElementId, successHandler, exceptionHandler);
+                        handleSuccess(this, data, settings.address, offlineResp.data, null, writeToLog, errorElementId, successHandler, exceptionHandler);
                     }
                     else {
                         if (offlineHandler != null) {

@@ -4,8 +4,6 @@ define(["jquery"], function(jQuery) {
        throw "Can't use ajax call since jquery is not defined";
     }
 
-	//we want to return an object that has a call run method
-	var module = function() {
 		return {
 			name: "ajax",
 			run: function(data, parameters, onSuccess, onError) {
@@ -24,7 +22,6 @@ define(["jquery"], function(jQuery) {
 					}
 				});
 			}
-		};
+	
 	};
-	return module;
 });

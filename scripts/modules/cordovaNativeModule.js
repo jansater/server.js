@@ -1,7 +1,7 @@
 define([], function() {
 
 	//we want to return an object that has a call run method
-	var module = function() {
+	
 		return {
 			name: "cordova",
 			run: function(data, parameters, onSuccess, onError) {
@@ -12,6 +12,5 @@ define([], function() {
                     });
 			}
 		};
-	};
-	return module;
+	
 });

@@ -54,8 +54,7 @@ define(["jquery"], function(jQuery) {
                 }
             }
 
-	//we want to return an object that has a call run method
-	var module = function() {
+	
 		return {
 			name: "signalr",
 			run: function(input, parameters, onSuccess, onError) {
@@ -71,6 +70,5 @@ define(["jquery"], function(jQuery) {
 				});
 			}
 		};
-	};
-	return module;
+	
 });
